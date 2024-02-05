@@ -120,10 +120,11 @@ func (a AuthorizeFn) Evaluate(ctx context.Context, fullMethod string, grpcReq in
 
 func NewDefaultAuthorizer(application string, opts ...Option) *DefaultAuthorizer {
 	cfg := &Config{
-		address:              opa_client.DefaultAddress,
-		decisionInputHandler: defDecisionInputer,
-		claimsVerifier:       UnverifiedClaimFromBearers,
-		acctEntitlementsApi:  DefaultAcctEntitlementsApiPath,
+		address:                 opa_client.DefaultAddress,
+		decisionInputHandler:    defDecisionInputer,
+		claimsVerifier:          UnverifiedClaimFromBearers,
+		acctEntitlementsApi:     DefaultAcctEntitlementsApiPath,
+		effectivePermissionsApi: DefaultEffectivePermissionsApiPath,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -137,25 +138,27 @@ func NewDefaultAuthorizer(application string, opts ...Option) *DefaultAuthorizer
 	}
 
 	a := DefaultAuthorizer{
-		clienter:             clienter,
-		opaEvaluator:         cfg.opaEvaluator,
-		application:          application,
-		decisionInputHandler: cfg.decisionInputHandler,
-		claimsVerifier:       cfg.claimsVerifier,
-		entitledServices:     cfg.entitledServices,
-		acctEntitlementsApi:  cfg.acctEntitlementsApi,
+		clienter:                clienter,
+		opaEvaluator:            cfg.opaEvaluator,
+		application:             application,
+		decisionInputHandler:    cfg.decisionInputHandler,
+		claimsVerifier:          cfg.claimsVerifier,
+		entitledServices:        cfg.entitledServices,
+		acctEntitlementsApi:     cfg.acctEntitlementsApi,
+		effectivePermissionsApi: cfg.effectivePermissionsApi,
 	}
 	return &a
 }
 
 type DefaultAuthorizer struct {
-	application          string
-	clienter             opa_client.Clienter
-	opaEvaluator         OpaEvaluator
-	decisionInputHandler DecisionInputHandler
-	claimsVerifier       ClaimsVerifier
-	entitledServices     []string
-	acctEntitlementsApi  string
+	application             string
+	clienter                opa_client.Clienter
+	opaEvaluator            OpaEvaluator
+	decisionInputHandler    DecisionInputHandler
+	claimsVerifier          ClaimsVerifier
+	entitledServices        []string
+	acctEntitlementsApi     string
+	effectivePermissionsApi string
 }
 
 type Config struct {
@@ -163,13 +166,14 @@ type Config struct {
 	// address to opa
 	address string
 
-	clienter             opa_client.Clienter
-	opaEvaluator         OpaEvaluator
-	authorizer           []Authorizer
-	decisionInputHandler DecisionInputHandler
-	claimsVerifier       ClaimsVerifier
-	entitledServices     []string
-	acctEntitlementsApi  string
+	clienter                opa_client.Clienter
+	opaEvaluator            OpaEvaluator
+	authorizer              []Authorizer
+	decisionInputHandler    DecisionInputHandler
+	claimsVerifier          ClaimsVerifier
+	entitledServices        []string
+	acctEntitlementsApi     string
+	effectivePermissionsApi string
 }
 
 type ClaimsVerifier func([]string, []string) (string, []error)
@@ -187,12 +191,7 @@ func (a DefaultAuthorizer) String() string {
 		a.application, a.clienter, a.decisionInputHandler)
 }
 
-func (a *DefaultAuthorizer) Evaluate(ctx context.Context, fullMethod string, grpcReq interface{}, opaEvaluator OpaEvaluator) (bool, context.Context, error) {
-
-	logger := ctxlogrus.Extract(ctx).WithFields(log.Fields{
-		"application": a.application,
-	})
-
+func (a *DefaultAuthorizer) ExtractJWT(ctx context.Context) (string, error) {
 	// This fetches auth data from auth headers in metadata from context:
 	// bearer = data from "authorization bearer" metadata header
 	// newBearer = data from "set-authorization bearer" metadata header
@@ -205,7 +204,20 @@ func (a *DefaultAuthorizer) Evaluate(ctx context.Context, fullMethod string, grp
 
 	rawJWT, errs := claimsVerifier([]string{bearer}, []string{newBearer})
 	if len(errs) > 0 {
-		return false, ctx, fmt.Errorf("%q", errs)
+		return "", fmt.Errorf("%q", errs)
+	}
+	return rawJWT, nil
+}
+
+func (a *DefaultAuthorizer) Evaluate(ctx context.Context, fullMethod string, grpcReq interface{}, opaEvaluator OpaEvaluator) (bool, context.Context, error) {
+
+	logger := ctxlogrus.Extract(ctx).WithFields(log.Fields{
+		"application": a.application,
+	})
+
+	rawJWT, err := a.ExtractJWT(ctx)
+	if err != nil {
+		return false, ctx, err
 	}
 
 	reqID, ok := requestid.FromContext(ctx)

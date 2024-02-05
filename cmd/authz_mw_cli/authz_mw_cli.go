@@ -29,6 +29,7 @@ func usageAndExit() {
 	fmt.Fprintf(os.Stderr, strings.Replace(`
 Usage: AUTHZ_MW_CLI <ip:port> validate <decisionDoc> <app> <endpoint> <jwt>
 Usage: AUTHZ_MW_CLI <ip:port> acct_entitlements <acct_id,...> <service,...>
+Usage: AUTHZ_MW_CLI <ip:port> effective_permissions <jwt>
 <ip:port> can be empty string, which will default to 'localhost:8181'
 <decisionDoc> can be empty string, which will default to OPA's configured default decision doc
 
@@ -36,7 +37,8 @@ Example:
 $ kubectl -n authz port-forward pod/authz-dbapi-5d7ff9fb49-ghz5c 18181:8181
 $ AUTHZ_MW_CLI localhost:18181 validate '' authz EffectivePermissions.GetEffectivePermissions <jwt>
 $ AUTHZ_MW_CLI localhost:18181 validate '/v1/data/authz/rbac/validate_v1' authz EffectivePermissions.GetEffectivePermissions <jwt>
-$ AUTHZ_MW_CLI localhost:18181 acct_entitlements 16,40 ddi,rpz
+$ AUTHZ_MW_CLI localhost:18181 acct_entitlements 16,40 ddi,rpz | jq .
+$ AUTHZ_MW_CLI localhost:18181 effective_permissions <jwt> | jq .
 
 `, `AUTHZ_MW_CLI`, os.Args[0], -1))
 	logrus.Exit(0)
@@ -68,6 +70,8 @@ func main() {
 		validate(ctx, opaIpPort)
 	case `acct_entitlements`:
 		acct_entitlements(ctx, opaIpPort)
+	case `effective_permissions`:
+		effective_permissions(ctx, opaIpPort)
 	default:
 		usageAndExit()
 	}
@@ -94,10 +98,7 @@ func validate(ctx context.Context, opaIpPort string) {
 	// Middleware will add `/` prefix to decisionDoc document, so remove it
 	decisionDoc = strings.TrimPrefix(decisionDoc, `/`)
 
-	// From https://github.com/grpc-ecosystem/go-grpc-middleware/blob/master/auth/metadata_test.go
-	bearer := fmt.Sprintf(`bearer %s`, jwt)
-	md := metadata.Pairs(`authorization`, bearer)
-	ctx = metautils.NiceMD(md).ToIncoming(ctx)
+	ctx = newContextWithJWT(ctx, jwt)
 
 	loggr.Infof("opaIpPort=`%s`\n", opaIpPort)
 	loggr.Infof("decisionDoc=`%s`\n", decisionDoc)
@@ -125,17 +126,54 @@ func acct_entitlements(ctx context.Context, opaIpPort string) {
 		usageAndExit()
 	}
 
-	acct_idsComma := os.Args[3]
-	servicesComma := os.Args[4]
+	acct_idsComma := strings.TrimSpace(os.Args[3])
+	servicesComma := strings.TrimSpace(os.Args[4])
 
-	acct_ids := strings.Split(acct_idsComma, `,`)
-	services := strings.Split(servicesComma, `,`)
+	acct_ids := []string{}
+	if len(acct_idsComma) > 0 {
+		acct_ids = strings.Split(acct_idsComma, `,`)
+	}
+
+	services := []string{}
+	if len(servicesComma) > 0 {
+		services = strings.Split(servicesComma, `,`)
+	}
 
 	loggr.Infof("opaIpPort=`%s`\n", opaIpPort)
-	loggr.Infof("acct_ids=%s\n", acct_ids)
-	loggr.Infof("services=%s\n", services)
+	loggr.Infof("acct_ids(len=%d)=%#v\n", len(acct_ids), acct_ids)
+	loggr.Infof("services(len=%d)=%#v\n", len(services), services)
 
-	fmt.Fprintf(os.Stderr, "acct_entitlements not implemented yet\n")
+	authzr := opamw.NewDefaultAuthorizer("no-application-name",
+		opamw.WithAddress(opaIpPort),
+	)
+
+	resultByt, resultErr := authzr.GetAcctEntitlementsBytes(ctx, acct_ids, services)
+
+	loggr.Infof("resultErr=%#v", resultErr)
+	fmt.Printf("%s\n", string(resultByt))
+}
+
+func effective_permissions(ctx context.Context, opaIpPort string) {
+	loggr := ctxlogrus.Extract(ctx)
+
+	if len(os.Args) < 4 {
+		usageAndExit()
+	}
+
+	jwt := os.Args[3]
+
+	ctx = newContextWithJWT(ctx, jwt)
+
+	loggr.Infof("opaIpPort=`%s`\n", opaIpPort)
+
+	authzr := opamw.NewDefaultAuthorizer("no-application-name",
+		opamw.WithAddress(opaIpPort),
+	)
+
+	resultByt, resultErr := authzr.GetEffectivePermissionsBytes(ctx)
+
+	loggr.Infof("resultErr=%#v", resultErr)
+	fmt.Printf("%s\n", string(resultByt))
 }
 
 type MyDecisionInputr struct {
@@ -144,4 +182,12 @@ type MyDecisionInputr struct {
 
 func (d MyDecisionInputr) GetDecisionInput(ctx context.Context, fullMethod string, grpcReq interface{}) (*opamw.DecisionInput, error) {
 	return &d.DecisionInput, nil
+}
+
+// From https://github.com/grpc-ecosystem/go-grpc-middleware/blob/master/auth/metadata_test.go
+func newContextWithJWT(ctx context.Context, jwt string) context.Context {
+	bearer := fmt.Sprintf(`bearer %s`, jwt)
+	md := metadata.Pairs(`authorization`, bearer)
+	ctx = metautils.NiceMD(md).ToIncoming(ctx)
+	return ctx
 }

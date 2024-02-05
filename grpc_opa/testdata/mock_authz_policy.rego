@@ -78,6 +78,54 @@ account_service_features := {
 	},
 }
 
+merged_input = merged {
+	is_string(input.jwt)
+	count(trim_space(input.jwt)) > 0
+	[_, payload, _] := io.jwt.decode(input.jwt)
+	merged := payload
+}
+
+else = merged {
+	merged := input
+}
+
+effective_permissions_api = eff_perm_result {
+	eff_perm_result := account_effective_permissions[merged_input.account_id]
+}
+
+account_effective_permissions := {
+	"2001016": {
+		"user-view": {
+			"id": "user-view",
+			"name": "User View",
+			"hidden": false,
+			"entitled_features": null,
+		},
+		"user-manage": {
+			"id": "user-manage",
+			"name": "User Manage",
+			"hidden": true,
+			"entitled_features": [],
+		},
+		"tag-list": {
+			"id": "tag-list",
+			"name": "Tag List",
+			"hidden": false,
+			"entitled_features": ["license.se"],
+		},
+		"tag-read": {
+			"id": "tag-read",
+			"name": "Tag Read",
+			"hidden": true,
+			"entitled_features": ["license.se", "license.td"],
+		},
+	},
+	"2001040": {
+	},
+	"2001230": {
+	},
+}
+
 test_acct_entitlements_api_no_input {
 	results := acct_entitlements_api
 	trace(sprintf("results: %v", [results]))
@@ -114,6 +162,39 @@ test_acct_entitlements_api_with_input {
 			"wheel": [
 				"run-flat",
 			],
+		},
+	}
+}
+
+test_effective_permissions_api_with_2001016_jwt {
+	results := effective_permissions_api with input as {
+		"jwt": "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50X2lkIjoiMjAwMTAxNiIsInNlcnZpY2UiOiJhbGwiLCJzdWJqZWN0Ijp7ImlkIjoic2VydmljZS5hbGwuMTY2MjE0MDUwNiIsInN1YmplY3RfdHlwZSI6InMycyIsImF1dGhlbnRpY2F0aW9uX3R5cGUiOiJiZWFyZXIifSwiYXVkIjoiaWItc3RrIiwiZXhwIjo0ODE1NzQwNTA2LCJpYXQiOjE2NjIxNDA1MDYsImlzcyI6ImF0bGFzLWNsYWltcyIsIm5iZiI6MTY2MjE0MDUwNn0.LiQd8R_ubBCbcC9HA0-T-xYD1KrAHpxTckGSnEFa6z1Uan8aufH8TrGmW2OZkQ5Nhn4mnONWgDARD--WIaK7VA",
+	}
+	trace(sprintf("results: %v", [results]))
+	results == {
+		"user-view": {
+			"id": "user-view",
+			"name": "User View",
+			"hidden": false,
+			"entitled_features": null,
+		},
+		"user-manage": {
+			"id": "user-manage",
+			"name": "User Manage",
+			"hidden": true,
+			"entitled_features": [],
+		},
+		"tag-list": {
+			"id": "tag-list",
+			"name": "Tag List",
+			"hidden": false,
+			"entitled_features": ["license.se"],
+		},
+		"tag-read": {
+			"id": "tag-read",
+			"name": "Tag Read",
+			"hidden": true,
+			"entitled_features": ["license.se", "license.td"],
 		},
 	}
 }

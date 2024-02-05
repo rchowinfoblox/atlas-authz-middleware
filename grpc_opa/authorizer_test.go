@@ -12,6 +12,7 @@ import (
 
 	"github.com/infobloxopen/atlas-authz-middleware/pkg/opa_client"
 	"github.com/infobloxopen/atlas-authz-middleware/utils_test"
+	atlas_claims "github.com/infobloxopen/atlas-claims"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/logrus/ctxlogrus"
 	logrus "github.com/sirupsen/logrus"
@@ -24,6 +25,30 @@ func TestRedactJWT(t *testing.T) {
 	if redacted := redactJWT(token); !strings.HasSuffix(redacted, REDACTED) {
 
 		t.Errorf("got: %s, wanted: %s", redacted, REDACTED)
+	}
+}
+
+func TestExtractJWT(t *testing.T) {
+	stdLoggr := logrus.StandardLogger()
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, utils_test.TestingTContextKey, t)
+	ctx = ctxlogrus.ToContext(ctx, logrus.NewEntry(stdLoggr))
+	claims := atlas_claims.Claims{
+		AccountId: "2001016",
+	}
+	ctx, expJWT, err := utils_test.NewContextWithClaims(ctx, claims)
+	if err != nil {
+		t.Errorf("NewContextWithClaims err: %s", err)
+	}
+	authzr := NewDefaultAuthorizer("fake-app")
+	gotJWT, err := authzr.ExtractJWT(ctx)
+	if err != nil {
+		t.Errorf("ExtractJWT err: %s", err)
+	}
+	t.Logf("expJWT: %s", expJWT)
+	t.Logf("gotJWT: %s", gotJWT)
+	if gotJWT != expJWT {
+		t.Errorf("gotJWT: %s\nexpJWT: %s", gotJWT, expJWT)
 	}
 }
 

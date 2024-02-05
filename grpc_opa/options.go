@@ -79,3 +79,10 @@ func WithAcctEntitlementsApiPath(acctEntitlementsApi string) Option {
 		c.acctEntitlementsApi = acctEntitlementsApi
 	}
 }
+
+// WithEffectivePermissionsApiPath overrides default EffectivePermissionsApiPath
+func WithEffectivePermissionsApiPath(effectivePermissionsApi string) Option {
+	return func(c *Config) {
+		c.effectivePermissionsApi = effectivePermissionsApi
+	}
+}
